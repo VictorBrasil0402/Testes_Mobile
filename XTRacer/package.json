@@ -1,0 +1,20 @@
+{
+  "name": "XTRacer",
+  "type": "module",
+  "devDependencies": {
+    "@faker-js/faker": "^10.6.0",
+    "@wdio/appium-service": "^9.32.0",
+    "@wdio/cli": "^9.32.0",
+    "@wdio/local-runner": "^9.32.0",
+    "@wdio/mocha-framework": "^9.32.0",
+    "@wdio/spec-reporter": "^9.32.0",
+    "appium": "^3.7.0",
+    "appium-uiautomator2-driver": "^8.7.0"
+  },
+  "scripts": {
+    "test": "wdio run ./wdio.conf.js"
+  },
+  "dependencies": {
+    "@box4dev/gerador-br": "^2.0.1"
+  }
+}
