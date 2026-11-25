@@ -1,0 +1,170 @@
+name: Mobile E2E Tests (Self-Hosted WSL)
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: mobile-emulator
+  cancel-in-progress: false
+
+env:
+  ANDROID_HOME: /home/victor/android-sdk
+  ANDROID_SDK_ROOT: /home/victor/android-sdk
+
+jobs:
+  native-apps:
+    name: Native - ${{ matrix.project.name }}
+    runs-on: [self-hosted, linux]
+    continue-on-error: true
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        project:
+          - name: MyDemoApp
+            directory: MyDemoApp
+            app_package: com.saucelabs.mydemoapp.android
+          - name: NativeDemoApp
+            directory: NativeDemoApp
+            app_package: com.wdiodemoapp
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+
+      - name: Ensure Headless Emulator is Running
+        timeout-minutes: 10
+        run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+
+          if ! adb devices | grep -q "emulator-5554.*device"; then
+            pkill -15 -f "qemu-system-x86_64.*Pixel_7_WSL" || true
+            rm -f ~/.emulator_console_auth_token
+
+            nohup "$ANDROID_HOME/emulator/emulator" -avd Pixel_7_WSL \
+              -no-window \
+              -no-audio \
+              -no-boot-anim \
+              -gpu swiftshader_indirect \
+              -no-snapshot-save > ~/emulator.log 2>&1 &
+
+            timeout 180 adb wait-for-device || { echo "ERRO: ADB nao conectou. Log:"; tail -n 50 ~/emulator.log; exit 1; }
+
+            counter=0
+            while [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; do
+              counter=$((counter+1))
+              if [ $counter -gt 150 ]; then
+                echo "ERRO: timeout no boot. Log:"
+                tail -n 50 ~/emulator.log
+                exit 1
+              fi
+              sleep 2
+            done
+
+            adb shell settings put global window_animation_scale 0
+            adb shell settings put global transition_animation_scale 0
+            adb shell settings put global animator_duration_scale 0
+          fi
+          adb devices
+
+      - name: Install dependencies & Run tests
+        working-directory: ${{ matrix.project.directory }}
+        run: |
+          npm ci
+          npx appium -v
+          npx appium driver list --installed
+
+          echo "Executando os testes E2E no runner local..."
+          npm test
+
+  xtracer:
+    name: Mobile Web - XTRacer
+    needs: native-apps
+    runs-on: [self-hosted, linux]
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24.22.1'
+
+      - name: Ensure Headless Emulator is Running
+        timeout-minutes: 10
+        run: |
+          export PATH="$ANDROID_HOME/cmdline-tools/latest/bin:$ANDROID_HOME/platform-tools:$ANDROID_HOME/emulator:$PATH"
+          echo "$ANDROID_HOME/cmdline-tools/latest/bin" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/platform-tools" >> "$GITHUB_PATH"
+          echo "$ANDROID_HOME/emulator" >> "$GITHUB_PATH"
+
+          if ! adb devices | grep -q "emulator-5554.*device"; then
+            pkill -15 -f "qemu-system-x86_64.*Pixel_7_WSL" || true
+            rm -f ~/.emulator_console_auth_token
+
+            nohup "$ANDROID_HOME/emulator/emulator" -avd Pixel_7_WSL \
+              -no-window \
+              -no-audio \
+              -no-boot-anim \
+              -gpu swiftshader_indirect \
+              -no-snapshot-save > ~/emulator.log 2>&1 &
+
+            timeout 180 adb wait-for-device || { echo "ERRO: ADB nao conectou. Log:"; tail -n 50 ~/emulator.log; exit 1; }
+
+            counter=0
+            while [ "$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" != "1" ]; do
+              counter=$((counter+1))
+              if [ $counter -gt 150 ]; then
+                echo "ERRO: timeout no boot. Log:"
+                tail -n 50 ~/emulator.log
+                exit 1
+              fi
+              sleep 2
+            done
+
+            adb shell settings put global window_animation_scale 0
+            adb shell settings put global transition_animation_scale 0
+            adb shell settings put global animator_duration_scale 0
+          fi
+          adb devices
+
+      - name: Install dependencies
+        working-directory: XTRacer
+        run: |
+          npm ci
+          npx appium -v
+          npx appium driver list --installed
+
+      - name: Run tests
+        working-directory: XTRacer
+        run: npm test -- --spec ./test/specs/login.e2e.js --spec ./test/specs/selecaoProduto.e2e.js
+        env:
+          TEST_EMAIL: ${{ secrets.EMAIL }}
+          TEST_PASSWORD: ${{ secrets.SENHA }}
+          TEST_CEP: ${{ secrets.CEP }}
+
+      - name: Teardown Headless Emulator
+        if: always()
+        run: |
+          export PATH="$ANDROID_HOME/platform-tools:$PATH"
+          adb -s emulator-5554 shell reboot -p 2>/dev/null || true
+          sleep 3
+          pkill -15 -f "qemu-system-x86_64.*Pixel_7_WSL" || true
+          echo "Emulador encerrado apos execucao de toda a suite."
